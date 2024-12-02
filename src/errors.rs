@@ -56,6 +56,15 @@ pub enum SetupError {
         err_span: (usize, usize),
         msg: String,
     },
+
+    #[diagnostic(code(didweb::url))]
+    Url {
+        #[source_code]
+        src: String,
+        #[label("URL parse error")]
+        err_span: (usize, usize),
+        msg: String,
+    },
 }
 
 pub type SetupResult<T> = miette::Result<T>;
@@ -69,6 +78,7 @@ impl Display for SetupError {
             SetupError::Document { msg, .. } => write!(f, "DID document error: {}", msg),
             SetupError::FileSystem { msg, .. } => write!(f, "Filesystem error: {}", msg),
             SetupError::Input { msg, .. } => write!(f, "Input error: {}", msg),
+            SetupError::Url { msg, .. } => write!(f, "URL parse error: {}", msg),
         }
     }
 }
@@ -127,6 +137,39 @@ impl SetupError {
             msg: msg.into(),
             src: src.clone(),
             err_span: (0, src.len()),
+        }
+    }
+
+    pub fn url(msg: impl Into<String>, src: impl AsRef<str>) -> Self {
+        let src = src.as_ref().to_string();
+        SetupError::Url {
+            msg: msg.into(),
+            src: src.clone(),
+            err_span: (0, src.len()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_display() {
+        let err = SetupError::config("test error", "test source");
+        assert_eq!(err.to_string(), "Configuration error: test error");
+    }
+
+    #[test]
+    fn test_error_construction() {
+        let err = SetupError::config("test error", "test source");
+        match err {
+            SetupError::Config { msg, src, err_span } => {
+                assert_eq!(msg, "test error");
+                assert_eq!(src, "test source");
+                assert_eq!(err_span, (0, "test source".len()));
+            }
+            _ => panic!("Wrong error variant"),
         }
     }
 }

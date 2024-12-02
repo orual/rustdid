@@ -7,7 +7,6 @@ pub trait SetupContext<T> {
     fn with_domain_context(self, msg: impl Into<String>) -> SetupResult<T>;
     fn with_document_context(self, msg: impl Into<String>) -> SetupResult<T>;
     fn with_fs_context(self, path: impl Into<PathBuf>, op: &str) -> SetupResult<T>;
-    fn with_input_context(self, field: &str) -> SetupResult<T>;
 }
 
 impl<T, E> SetupContext<T> for Result<T, E>
@@ -48,14 +47,6 @@ where
             let msg = format!("Failed to {} {}", op, path.display());
             let src = format!("Filesystem operation failed: {}", e);
             SetupError::fs(msg, &src)
-        })?)
-    }
-
-    fn with_input_context(self, field: &str) -> SetupResult<T> {
-        Ok(self.map_err(|e| {
-            let msg = format!("Invalid input for field: {}", field);
-            let src = format!("Input validation failed: {}", e);
-            SetupError::input(msg, &src)
         })?)
     }
 }
