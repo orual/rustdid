@@ -1,7 +1,7 @@
-use base58::ToBase58;
-use base64::Engine;
 use crate::context::SetupContext;
 use crate::errors::SetupResult;
+use base58::ToBase58;
+use base64::Engine;
 use futures_lite::AsyncWriteExt;
 use smol::process::{Command, Stdio};
 
@@ -34,20 +34,23 @@ pub async fn generate_keypair() -> SetupResult<KeyPair> {
         .with_keypair_context("Failed to start PKCS8 conversion")?;
 
     if let Some(mut stdin) = pkcs8_cmd.stdin.take() {
-        stdin.write_all(&private_key.stdout)
+        stdin
+            .write_all(&private_key.stdout)
             .await
             .with_keypair_context("Failed to write to PKCS8 process")?;
-        stdin.flush()
+        stdin
+            .flush()
             .await
             .with_keypair_context("Failed to flush PKCS8 input")?;
     }
 
-    let output = pkcs8_cmd.output()
+    let output = pkcs8_cmd
+        .output()
         .await
         .with_keypair_context("Failed to complete PKCS8 conversion")?;
 
-    let private_key_pkcs8 = String::from_utf8(output.stdout)
-        .with_keypair_context("Invalid UTF-8 in private key")?;
+    let private_key_pkcs8 =
+        String::from_utf8(output.stdout).with_keypair_context("Invalid UTF-8 in private key")?;
 
     // Extract public key
     let mut pubkey_cmd = Command::new("openssl")
@@ -58,15 +61,18 @@ pub async fn generate_keypair() -> SetupResult<KeyPair> {
         .with_keypair_context("Failed to start public key extraction")?;
 
     if let Some(mut stdin) = pubkey_cmd.stdin.take() {
-        stdin.write_all(private_key_pkcs8.as_bytes())
+        stdin
+            .write_all(private_key_pkcs8.as_bytes())
             .await
             .with_keypair_context("Failed to write to public key process")?;
-        stdin.flush()
+        stdin
+            .flush()
             .await
             .with_keypair_context("Failed to flush public key input")?;
     }
 
-    let output = pubkey_cmd.output()
+    let output = pubkey_cmd
+        .output()
         .await
         .with_keypair_context("Failed to extract public key")?;
 
@@ -84,10 +90,10 @@ pub async fn generate_keypair() -> SetupResult<KeyPair> {
 
 fn extract_raw_public_key(pem_data: &[u8]) -> Result<Vec<u8>, &'static str> {
     // Parse PEM to get DER data
-    let pem = String::from_utf8(pem_data.to_vec())
-        .map_err(|_| "Invalid UTF-8 in PEM data")?;
+    let pem = String::from_utf8(pem_data.to_vec()).map_err(|_| "Invalid UTF-8 in PEM data")?;
 
-    let der_base64 = pem.lines()
+    let der_base64 = pem
+        .lines()
         .filter(|line| !line.contains("BEGIN") && !line.contains("END"))
         .collect::<String>();
 
@@ -133,7 +139,8 @@ mod tests {
             assert!(keypair.public_key_multibase.starts_with('z'));
 
             // Verify multibase encoding structure
-            let decoded = base58::FromBase58::from_base58(&keypair.public_key_multibase[1..]).unwrap();
+            let decoded =
+                base58::FromBase58::from_base58(&keypair.public_key_multibase[1..]).unwrap();
             assert_eq!(&decoded[..2], &[0x12, 0x00]);
             assert_eq!(decoded[2], 0x04); // Uncompressed point format
             assert_eq!(decoded.len(), 67); // 0x1200 + 65 bytes public key
