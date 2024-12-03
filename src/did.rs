@@ -1,4 +1,5 @@
-use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use base58::FromBase58;
+use jwt_simple::prelude::*;
 use serde::{Deserialize, Serialize};
 use smol::fs;
 use std::path::PathBuf;
@@ -46,18 +47,10 @@ pub struct DidDocument {
     pub service: Vec<Service>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ServiceAuthClaims {
     iss: String,
     aud: String,
-    exp: i64,
-    iat: i64,
-}
-
-enum SecretType {
-    Plain,
-    Pem,
-    Der,
 }
 
 impl SetupConfig {
@@ -109,28 +102,29 @@ impl DidDocument {
     }
 }
 
-fn detect_secret_type(secret: &[u8]) -> SecretType {
-    if secret.starts_with(b"-----BEGIN") {
-        SecretType::Pem
-    } else if !secret.is_empty() && secret[0] == 0x30 {
-        SecretType::Der
-    } else {
-        SecretType::Plain
-    }
-}
+fn load_ec_key(key_data: &str) -> SetupResult<ES256kKeyPair> {
+    // Parse multibase-encoded private key
+    let decoded = key_data[1..]
+        .from_base58()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{:?}", e)))
+        .with_document_context("Invalid multibase encoding")?;
 
-fn load_ec_key(key_data: &[u8]) -> SetupResult<EncodingKey> {
-    match detect_secret_type(key_data) {
-        SecretType::Pem => {
-            EncodingKey::from_ec_pem(key_data).with_keypair_context("Invalid EC PEM key format")
-        }
-        SecretType::Der => Ok(EncodingKey::from_ec_der(key_data)),
-        SecretType::Plain => Err(std::io::Error::new(
+    // Skip multicodec prefix (0x8126)
+    if decoded.len() < 34 || decoded[0] != 0x81 || decoded[1] != 0x26 {
+        return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "Raw key data not supported for ES256",
+            "Invalid multicodec prefix",
         ))
-        .with_keypair_context("Unsupported key format")?,
+        .with_document_context("Invalid key format")?;
     }
+
+    // Extract the raw key bytes (skip the multicodec prefix)
+    let key_bytes = &decoded[2..];
+
+    // Create ES256K key pair directly from the raw bytes
+    ES256kKeyPair::from_bytes(key_bytes)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))
+        .with_document_context("Failed to create ES256K key pair")
 }
 
 pub async fn generate_service_auth(
@@ -138,34 +132,39 @@ pub async fn generate_service_auth(
     audience: &str,
     private_key: &str,
 ) -> SetupResult<String> {
-    let now = OffsetDateTime::now_utc();
-    let exp = now + time::Duration::minutes(5);
+    let jwt_claims = Claims::create(Duration::from_secs(300))
+        .with_issuer(issuer)
+        .with_audience(audience);
 
-    let claims = ServiceAuthClaims {
-        iss: issuer.to_string(),
-        aud: audience.to_string(),
-        exp: exp.unix_timestamp(),
-        iat: now.unix_timestamp(),
-    };
+    let key = load_ec_key(private_key)?;
 
-    let mut header = Header::new(Algorithm::ES256);
-    header.typ = None;
+    let token = key
+        .sign(jwt_claims)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        .with_document_context("Failed to generate JWT token")?;
 
-    let key = load_ec_key(private_key.as_bytes())?;
-
-    encode(&header, &claims, &key).with_document_context("Failed to generate JWT token")
+    Ok(token)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use k256::SecretKey;
+    use rand::rngs::OsRng;
     use tempfile::tempdir;
 
-    const TEST_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgMUplEH9KyymJ+b5Z
-eWUJXwb09fEhBZdUcF+Z3L52zYOhRANCAAT05IS6H4HpvXCDyMefgguNgsjTwy7y
-TWdyNCIIeYoOkBOKsiLFfOC1DFdFoi0TnUI/bs7OMCXJX2g5D/y41RTD
------END PRIVATE KEY-----"#;
+    fn generate_test_key() -> String {
+        // Generate a test private key using k256
+        let secret_key = SecretKey::random(&mut OsRng);
+        let key_bytes = secret_key.to_bytes();
+
+        // Create multibase encoding with our prefix (0x8126)
+        let mut encoded = vec![0x81, 0x26];
+        encoded.extend_from_slice(&key_bytes);
+
+        // Return z-base58 encoded string
+        format!("z{}", base58::ToBase58::to_base58(&encoded[..]))
+    }
 
     #[test]
     fn test_did_document_creation() {
@@ -207,8 +206,10 @@ TWdyNCIIeYoOkBOKsiLFfOC1DFdFoi0TnUI/bs7OMCXJX2g5D/y41RTD
     #[test]
     fn test_service_auth_generation() {
         smol::block_on(async {
+            let test_key = generate_test_key();
+
             let result =
-                generate_service_auth("did:web:example.com", "did:web:pds.example.com", TEST_PEM)
+                generate_service_auth("did:web:example.com", "did:web:pds.example.com", &test_key)
                     .await;
 
             assert!(
@@ -226,8 +227,8 @@ TWdyNCIIeYoOkBOKsiLFfOC1DFdFoi0TnUI/bs7OMCXJX2g5D/y41RTD
                     .unwrap();
             let header_json: serde_json::Value =
                 serde_json::from_str(&String::from_utf8(header).unwrap()).unwrap();
-            assert_eq!(header_json["alg"], "ES256");
-            assert!(!header_json.as_object().unwrap().contains_key("typ"));
+            assert_eq!(header_json["alg"], "ES256K");
+            assert_eq!(header_json["typ"], "JWT");
 
             let claims =
                 base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, parts[1])
@@ -239,6 +240,25 @@ TWdyNCIIeYoOkBOKsiLFfOC1DFdFoi0TnUI/bs7OMCXJX2g5D/y41RTD
             assert!(claims_json["exp"].is_number());
             assert!(claims_json["iat"].is_number());
         });
+    }
+
+    #[test]
+    fn test_key_format() {
+        let test_key = generate_test_key();
+
+        // Test that we can load the key
+        let result = load_ec_key(&test_key);
+        assert!(result.is_ok(), "Failed to load test key");
+
+        // Verify the key format
+        assert!(
+            test_key.starts_with('z'),
+            "Key should start with multibase prefix 'z'"
+        );
+
+        let decoded = test_key[1..].from_base58().unwrap();
+        assert_eq!(&decoded[0..2], &[0x81, 0x26], "Invalid multicodec prefix");
+        assert_eq!(decoded.len(), 34, "Invalid key length"); // 2 bytes prefix + 32 bytes key
     }
 
     #[test]

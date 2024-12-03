@@ -3,7 +3,6 @@ use std::path::PathBuf;
 
 pub trait SetupContext<T> {
     fn with_config_context(self, msg: impl Into<String>) -> SetupResult<T>;
-    fn with_keypair_context(self, msg: impl Into<String>) -> SetupResult<T>;
     fn with_domain_context(self, msg: impl Into<String>) -> SetupResult<T>;
     fn with_document_context(self, msg: impl Into<String>) -> SetupResult<T>;
     fn with_fs_context(self, path: impl Into<PathBuf>, op: &str) -> SetupResult<T>;
@@ -17,13 +16,6 @@ where
         Ok(self.map_err(|e| {
             let src = format!("Config operation failed: {}", e);
             SetupError::config(msg, &src)
-        })?)
-    }
-
-    fn with_keypair_context(self, msg: impl Into<String>) -> SetupResult<T> {
-        Ok(self.map_err(|e| {
-            let src = format!("Key operation failed: {}", e);
-            SetupError::keypair(msg, &src)
         })?)
     }
 

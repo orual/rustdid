@@ -12,15 +12,6 @@ pub enum SetupError {
         msg: String,
     },
 
-    #[diagnostic(code(didweb::keypair))]
-    KeyPair {
-        #[source_code]
-        src: String,
-        #[label("key generation failed")]
-        err_span: (usize, usize),
-        msg: String,
-    },
-
     #[diagnostic(code(didweb::domain))]
     Domain {
         #[source_code]
@@ -73,7 +64,6 @@ impl Display for SetupError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SetupError::Config { msg, .. } => write!(f, "Configuration error: {}", msg),
-            SetupError::KeyPair { msg, .. } => write!(f, "Key generation error: {}", msg),
             SetupError::Domain { msg, .. } => write!(f, "Domain error: {}", msg),
             SetupError::Document { msg, .. } => write!(f, "DID document error: {}", msg),
             SetupError::FileSystem { msg, .. } => write!(f, "Filesystem error: {}", msg),
@@ -89,15 +79,6 @@ impl SetupError {
     pub fn config(msg: impl Into<String>, src: impl AsRef<str>) -> Self {
         let src = src.as_ref().to_string();
         SetupError::Config {
-            msg: msg.into(),
-            src: src.clone(),
-            err_span: (0, src.len()),
-        }
-    }
-
-    pub fn keypair(msg: impl Into<String>, src: impl AsRef<str>) -> Self {
-        let src = src.as_ref().to_string();
-        SetupError::KeyPair {
             msg: msg.into(),
             src: src.clone(),
             err_span: (0, src.len()),
