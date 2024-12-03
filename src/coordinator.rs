@@ -72,19 +72,6 @@ impl SetupCoordinator {
         self.current_step.clone()
     }
 
-    pub fn can_proceed(&self) -> bool {
-        match self.current_step {
-            SetupStep::Init => true,
-            SetupStep::Domain => self.domain.is_some(),
-            SetupStep::Pds => self.pds_host.is_some(),
-            SetupStep::Keys => true,
-            SetupStep::DidDocument => self.keypair.is_some(),
-            SetupStep::ServiceAuth => self.did_document.is_some(),
-            SetupStep::Account => self.service_auth.is_some() && self.account_params.is_some(),
-            SetupStep::Complete => false,
-        }
-    }
-
     pub async fn proceed(&mut self) -> SetupResult<()> {
         match self.current_step {
             SetupStep::Init => {
@@ -317,7 +304,7 @@ impl SetupCoordinator {
             SetupStep::Init => "Starting the setup process...",
             SetupStep::Domain => "Enter your domain name (e.g., example.com)",
             SetupStep::Pds => "Enter your PDS host URL (e.g., https://pds.example.com)",
-            SetupStep::Keys => "Generating NIST P-256 keypair...",
+            SetupStep::Keys => "Generating secp256k1 keypair...",
             SetupStep::DidDocument => "Creating DID document with verification methods...",
             SetupStep::ServiceAuth => "Generating service authentication token...",
             SetupStep::Account => "Complete account setup with handle, password, and invite code",
