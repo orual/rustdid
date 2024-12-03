@@ -1,8 +1,13 @@
 use base58::FromBase58;
-use jwt_simple::prelude::*;
+use base64::Engine;
+use k256::{
+    ecdsa::{signature::Signer, Signature, SigningKey},
+    SecretKey,
+};
 use serde::{Deserialize, Serialize};
 use smol::fs;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 use time::OffsetDateTime;
 
 use crate::{context::SetupContext, errors::SetupResult};
@@ -47,10 +52,18 @@ pub struct DidDocument {
     pub service: Vec<Service>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct ServiceAuthClaims {
+#[derive(Debug, Serialize)]
+struct JwtHeader {
+    alg: String,
+    typ: String,
+}
+
+#[derive(Debug, Serialize)]
+struct JwtClaims {
     iss: String,
     aud: String,
+    exp: u64,
+    iat: u64,
 }
 
 impl SetupConfig {
@@ -85,7 +98,7 @@ impl DidDocument {
             service: vec![Service {
                 id: "#atproto_pds".to_string(),
                 service_type: "AtprotoPersonalDataServer".to_string(),
-                service_endpoint: pds_host.to_string(),
+                service_endpoint: pds_host.trim_end_matches('/').to_string(),
             }],
         }
     }
@@ -102,7 +115,15 @@ impl DidDocument {
     }
 }
 
-fn load_ec_key(key_data: &str) -> SetupResult<ES256kKeyPair> {
+fn encode_jwt_part<T: Serialize>(value: &T) -> SetupResult<String> {
+    let json = serde_json::to_vec(value)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))
+        .with_document_context("Failed to serialize JWT part")?;
+
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json))
+}
+
+fn load_signing_key(key_data: &str) -> SetupResult<SigningKey> {
     // Parse multibase-encoded private key
     let decoded = key_data[1..]
         .from_base58()
@@ -121,10 +142,12 @@ fn load_ec_key(key_data: &str) -> SetupResult<ES256kKeyPair> {
     // Extract the raw key bytes (skip the multicodec prefix)
     let key_bytes = &decoded[2..];
 
-    // Create ES256K key pair directly from the raw bytes
-    ES256kKeyPair::from_bytes(key_bytes)
+    // Create signing key from secret key
+    let secret_key = SecretKey::from_slice(key_bytes)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))
-        .with_document_context("Failed to create ES256K key pair")
+        .with_document_context("Failed to create secret key")?;
+
+    Ok(SigningKey::from(secret_key))
 }
 
 pub async fn generate_service_auth(
@@ -132,38 +155,79 @@ pub async fn generate_service_auth(
     audience: &str,
     private_key: &str,
 ) -> SetupResult<String> {
-    let jwt_claims = Claims::create(Duration::from_secs(300))
-        .with_issuer(issuer)
-        .with_audience(audience);
+    // Create header
+    let header = JwtHeader {
+        alg: "ES256K".to_string(),
+        typ: "JWT".to_string(),
+    };
+    let header_encoded = encode_jwt_part(&header)?;
 
-    let key = load_ec_key(private_key)?;
-
-    let token = key
-        .sign(jwt_claims)
+    // Create claims
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-        .with_document_context("Failed to generate JWT token")?;
+        .with_document_context("Failed to get current time")?
+        .as_secs();
 
-    Ok(token)
+    let claims = JwtClaims {
+        iss: issuer.to_string(),
+        aud: audience.to_string(),
+        exp: now + 300, // 5 minutes expiry
+        iat: now,
+    };
+    let claims_encoded = encode_jwt_part(&claims)?;
+
+    // Create signature input
+    let signature_input = format!("{}.{}", header_encoded, claims_encoded);
+
+    // Sign the input
+    let signing_key = load_signing_key(private_key)?;
+    let signature: Signature = signing_key.sign(signature_input.as_bytes());
+
+    // Encode signature
+    let signature_encoded =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(signature.to_der());
+
+    // Combine all parts
+    Ok(format!(
+        "{}.{}.{}",
+        header_encoded, claims_encoded, signature_encoded
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use k256::SecretKey;
     use rand::rngs::OsRng;
     use tempfile::tempdir;
 
     fn generate_test_key() -> String {
-        // Generate a test private key using k256
         let secret_key = SecretKey::random(&mut OsRng);
         let key_bytes = secret_key.to_bytes();
 
-        // Create multibase encoding with our prefix (0x8126)
         let mut encoded = vec![0x81, 0x26];
         encoded.extend_from_slice(&key_bytes);
 
-        // Return z-base58 encoded string
         format!("z{}", base58::ToBase58::to_base58(&encoded[..]))
+    }
+
+    #[test]
+    fn test_key_format() {
+        let test_key = generate_test_key();
+
+        // Test that we can load the key
+        let result = load_signing_key(&test_key);
+        assert!(result.is_ok(), "Failed to load test key");
+
+        // Verify the key format
+        assert!(
+            test_key.starts_with('z'),
+            "Key should start with multibase prefix 'z'"
+        );
+
+        let decoded = test_key[1..].from_base58().unwrap();
+        assert_eq!(&decoded[0..2], &[0x81, 0x26], "Invalid multicodec prefix");
+        assert_eq!(decoded.len(), 34, "Invalid key length"); // 2 bytes prefix + 32 bytes key
     }
 
     #[test]
@@ -217,22 +281,25 @@ mod tests {
                 "Failed to generate service auth token: {:?}",
                 result.err()
             );
-            let token = result.unwrap();
 
+            let token = result.unwrap();
             let parts: Vec<&str> = token.split('.').collect();
+
             assert_eq!(parts.len(), 3, "Invalid JWT structure");
 
-            let header =
-                base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, parts[0])
-                    .unwrap();
+            // Verify header
+            let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(parts[0])
+                .unwrap();
             let header_json: serde_json::Value =
                 serde_json::from_str(&String::from_utf8(header).unwrap()).unwrap();
             assert_eq!(header_json["alg"], "ES256K");
             assert_eq!(header_json["typ"], "JWT");
 
-            let claims =
-                base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, parts[1])
-                    .unwrap();
+            // Verify claims
+            let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(parts[1])
+                .unwrap();
             let claims_json: serde_json::Value =
                 serde_json::from_str(&String::from_utf8(claims).unwrap()).unwrap();
             assert_eq!(claims_json["iss"], "did:web:example.com");
@@ -240,25 +307,6 @@ mod tests {
             assert!(claims_json["exp"].is_number());
             assert!(claims_json["iat"].is_number());
         });
-    }
-
-    #[test]
-    fn test_key_format() {
-        let test_key = generate_test_key();
-
-        // Test that we can load the key
-        let result = load_ec_key(&test_key);
-        assert!(result.is_ok(), "Failed to load test key");
-
-        // Verify the key format
-        assert!(
-            test_key.starts_with('z'),
-            "Key should start with multibase prefix 'z'"
-        );
-
-        let decoded = test_key[1..].from_base58().unwrap();
-        assert_eq!(&decoded[0..2], &[0x81, 0x26], "Invalid multicodec prefix");
-        assert_eq!(decoded.len(), 34, "Invalid key length"); // 2 bytes prefix + 32 bytes key
     }
 
     #[test]
