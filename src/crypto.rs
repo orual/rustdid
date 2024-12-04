@@ -19,14 +19,14 @@ impl KeyPair {
     }
 }
 
-fn encode_private_multibase(data: &[u8]) -> String {
+pub fn encode_private_multibase(data: &[u8]) -> String {
     // multicodec secp256k1-priv, code 0x1301
     let mut encoded = vec![0x81, 0x26];
     encoded.extend_from_slice(data);
     format!("z{}", encoded.to_base58())
 }
 
-fn encode_public_multibase(data: &[u8]) -> String {
+pub fn encode_public_multibase(data: &[u8]) -> String {
     // multicodec secp256k1-pub, code 0xE7
     let mut encoded = vec![0xE7, 0x01];
     encoded.extend_from_slice(data);

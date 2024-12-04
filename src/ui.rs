@@ -1,6 +1,6 @@
 use crate::{
     coordinator::{AccountParams, SetupCoordinator, SetupStep},
-    domain,
+    crypto, domain,
     errors::{SetupError, SetupResult},
 };
 use crossterm::{
@@ -8,6 +8,11 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
+use k256::{
+    elliptic_curve::sec1::ToEncodedPoint,
+    SecretKey,
+};
+use rand::rngs::OsRng;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
@@ -18,13 +23,13 @@ use ratatui::{
 };
 use std::{io, path::PathBuf};
 
-const LOGO: &str = r#"                                               
-________              ____________________________ 
+const LOGO: &str = r#"
+________              ____________________________
 ___  __ \___  __________  /___  __ \___  _/__  __ \
 __  /_/ /  / / /_  ___/  __/_  / / /__  / __  / / /
-_  _, _// /_/ /_(__  )/ /_ _  /_/ /__/ /  _  /_/ / 
-/_/ |_| \__,_/ /____/ \__/ /_____/ /___/  /_____/  
-                                           
+_  _, _// /_/ /_(__  )/ /_ _  /_/ /__/ /  _  /_/ /
+/_/ |_| \__,_/ /____/ \__/ /_____/ /___/  /_____/
+
 "#;
 
 #[derive(Debug, Clone)]
@@ -40,6 +45,7 @@ enum SetupMode {
     Menu,
     Did,
     Account,
+    KeyGen,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -155,7 +161,6 @@ impl SetupUI {
                 ),
                 Span::raw("]"),
             ]),
-            Line::from("Press 1 to setup or update your DID document"),
             Line::from(""),
             Line::from(vec![
                 Span::styled("Account Setup ", Style::default().fg(Color::Blue)),
@@ -175,15 +180,10 @@ impl SetupUI {
                 Span::raw("]"),
             ]),
             Line::from(if state.did_complete {
-                "Press 2 to setup your account"
+                "Ready to proceed with account setup"
             } else {
                 "Complete DID document setup before account setup"
             }),
-            Line::from(""),
-            Line::from(vec![Span::styled(
-                "Press ESC to exit",
-                Style::default().fg(Color::DarkGray),
-            )]),
         ]
     }
 
@@ -200,9 +200,38 @@ impl SetupUI {
                 self.add_output("Starting account setup...".into());
                 Ok(false)
             }
+            KeyCode::Char('3') => {
+                self.mode = SetupMode::KeyGen;
+                smol::block_on(self.generate_test_keys())?;
+                self.mode = SetupMode::Menu;
+                Ok(false)
+            }
             KeyCode::Esc => Ok(true),
             _ => Ok(false),
         }
+    }
+
+    async fn generate_test_keys(&mut self) -> SetupResult<()> {
+        self.add_output("Generating test keys...".into());
+
+        let secret_key = SecretKey::random(&mut OsRng);
+        let private_key_bytes = secret_key.to_bytes().to_vec();
+
+        let public_key = secret_key.public_key();
+        let public_key_bytes = public_key.to_encoded_point(true).as_bytes().to_vec();
+
+        let private_key_multibase = crypto::encode_private_multibase(&private_key_bytes);
+        let public_key_multibase = crypto::encode_public_multibase(&public_key_bytes);
+        let did_key = format!("did:key:{}", public_key_multibase);
+
+        self.add_output("\nPrivate Key (Multibase):".into());
+        self.add_output(private_key_multibase);
+        self.add_output("\nPublic Key (Multibase):".into());
+        self.add_output(public_key_multibase);
+        self.add_output("\nDID Key:".into());
+        self.add_output(did_key);
+
+        Ok(())
     }
 
     fn handle_account_input(&mut self) -> SetupResult<bool> {
@@ -387,6 +416,16 @@ impl SetupUI {
                         }
                         _ => {}
                     },
+                    SetupMode::KeyGen => match key.code {
+                        KeyCode::Enter => {
+                            self.generate_test_keys().await?;
+                            self.mode = SetupMode::Menu;
+                        }
+                        KeyCode::Esc => {
+                            self.mode = SetupMode::Menu;
+                        }
+                        _ => {}
+                    },
                 }
             }
         }
@@ -550,10 +589,10 @@ impl SetupUI {
                 let chunks = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([
-                        Constraint::Length(7), // Logo
+                        Constraint::Length(8), // Logo
                         Constraint::Length(3), // Status
                         Constraint::Length(3), // Input
-                        Constraint::Length(8), // Menu/Help
+                        Constraint::Length(5), // Menu/Help
                         Constraint::Min(5),    // Output Area
                         Constraint::Length(3), // Controls
                     ])
@@ -591,7 +630,10 @@ impl SetupUI {
                 }
 
                 // Menu/Help Text
-                let menu = Paragraph::new(menu_text).block(Block::default().borders(Borders::ALL));
+                let menu = Paragraph::new(menu_text)
+                    .style(Style::default().fg(Color::Magenta))
+                    .block(Block::default()
+                    .borders(Borders::ALL));
                 f.render_widget(menu, chunks[3]);
 
                 // Output Area
@@ -609,6 +651,8 @@ impl SetupUI {
                         Span::raw(" DID Setup  |  "),
                         Span::styled("2", Style::default().fg(Color::Blue)),
                         Span::raw(" Account Setup  |  "),
+                        Span::styled("3", Style::default().fg(Color::Blue)),
+                        Span::raw(" Keygen (Devtool)  |  "),
                         Span::styled("ESC", Style::default().fg(Color::Blue)),
                         Span::raw(" Exit"),
                     ])],
