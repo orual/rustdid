@@ -36,12 +36,26 @@ pub async fn validate_domain(domain: &str) -> SetupResult<()> {
     Ok(())
 }
 
+pub fn format_pds_url(input: &str) -> String {
+    let trimmed = input.trim();
+
+    // If URL already has a scheme, return as is
+    if trimmed.contains("://") {
+        return trimmed.to_string();
+    }
+
+    // Add https:// if missing
+    format!("https://{}", trimmed)
+}
+
 pub async fn validate_pds_host(pds_host: &str) -> SetupResult<()> {
-    let url = Url::parse(pds_host)
+    let formatted_url = format_pds_url(pds_host);
+
+    let url = Url::parse(&formatted_url)
         .map_err(|e| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                format!("Invalid PDS URL: {}", e),
+                format!("Invalid PDS URL format: {}. Please provide a valid HTTPS URL (e.g., https://pds.example.com)", e),
             )
         })
         .with_domain_context("Invalid PDS host format")?;
@@ -49,9 +63,17 @@ pub async fn validate_pds_host(pds_host: &str) -> SetupResult<()> {
     if url.scheme() != "https" {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "PDS host must use HTTPS",
+            "PDS host must use HTTPS. Please update your URL to use https:// instead of http://",
         ))
         .with_domain_context("Invalid PDS protocol")?;
+    }
+
+    if url.host_str().is_none() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Missing hostname in PDS URL. Please include a valid domain name (e.g., https://pds.example.com)",
+        ))
+        .with_domain_context("Invalid PDS host")?;
     }
 
     Ok(())

@@ -1,5 +1,6 @@
 use crate::{
     coordinator::{AccountParams, SetupCoordinator, SetupStep},
+    domain,
     errors::{SetupError, SetupResult},
 };
 use crossterm::{
@@ -18,11 +19,12 @@ use ratatui::{
 use std::{io, path::PathBuf};
 
 const LOGO: &str = r#"                                               
-                     ___________________________
-___________  __________  /______  /__(_)_____  /
-__  ___/  / / /_  ___/  __/  __  /__  /_  __  / 
-_  /   / /_/ /_(__  )/ /_ / /_/ / _  / / /_/ /  
-/_/    \__,_/ /____/ \__/ \__,_/  /_/  \__,_/   
+________              ____________________________ 
+___  __ \___  __________  /___  __ \___  _/__  __ \
+__  /_/ /  / / /_  ___/  __/_  / / /__  / __  / / /
+_  _, _// /_/ /_(__  )/ /_ _  /_/ /__/ /  _  /_/ / 
+/_/ |_| \__,_/ /____/ \__/ /_____/ /___/  /_____/  
+                                           
 "#;
 
 #[derive(Debug, Clone)]
@@ -429,15 +431,11 @@ impl SetupUI {
             return Ok(());
         }
 
-        if self.current_input.contains("bsky.social") {
-            self.status_message = "Error: bsky.social cannot be used as PDS".into();
-            self.is_error = true;
-            return Ok(());
-        }
+        let formatted_input = domain::format_pds_url(&self.current_input);
 
-        match self.coordinator.set_pds_host(self.current_input.clone()) {
+        match self.coordinator.set_pds_host(formatted_input.clone()) {
             Ok(_) => {
-                self.add_output(format!("Setting PDS host to: {}", self.current_input));
+                self.add_output(format!("Setting PDS host to: {}", formatted_input));
                 match self.coordinator.proceed().await {
                     Ok(_) => {
                         self.add_output("PDS host configuration completed successfully.".into());

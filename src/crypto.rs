@@ -19,7 +19,6 @@ impl KeyPair {
     }
 }
 
-
 fn encode_private_multibase(data: &[u8]) -> String {
     // multicodec secp256k1-priv, code 0x1301
     let mut encoded = vec![0x81, 0x26];

@@ -230,7 +230,7 @@ impl SetupCoordinator {
         if pds_host.is_empty() {
             return Err(SetupError::input(
                 "PDS host cannot be empty",
-                "Empty PDS host provided",
+                "Please enter a valid PDS host URL",
             ))?;
         }
         Ok(())
@@ -243,14 +243,18 @@ impl SetupCoordinator {
     }
 
     pub fn set_pds_host(&mut self, pds_host: String) -> SetupResult<()> {
-        self.validate_pds_host(&pds_host)?;
-        if pds_host.contains("bsky.social") {
+        let formatted_host = domain::format_pds_url(&pds_host);
+
+        self.validate_pds_host(&formatted_host)?;
+
+        if formatted_host.contains("bsky.social") {
             return Err(SetupError::input(
                 "bsky.social cannot be used as PDS",
-                "Invalid PDS host",
+                "Please use your own PDS instance instead of bsky.social",
             ))?;
         }
-        self.pds_host = Some(pds_host);
+
+        self.pds_host = Some(formatted_host);
         Ok(())
     }
 
@@ -299,13 +303,13 @@ impl SetupCoordinator {
     pub fn step_help(&self) -> &'static str {
         match self.current_step {
             SetupStep::Init => "Starting the setup process...",
-            SetupStep::Domain => "Enter your domain name (e.g., example.com)",
-            SetupStep::Pds => "Enter your PDS host URL (e.g., https://pds.example.com)",
+            SetupStep::Domain => "Enter your handle (e.g. example.com)",
+            SetupStep::Pds => "Enter your PDS host URL (https:// will be added if not provided)",
             SetupStep::Keys => "Generating secp256k1 keypair...",
             SetupStep::DidDocument => "Creating DID document with verification methods...",
             SetupStep::ServiceAuth => "Generating service authentication token...",
             SetupStep::Account => "Complete account setup with handle, password, and invite code",
-            SetupStep::Complete => "Setup is complete. Your DID Web is ready to use.",
+            SetupStep::Complete => "Setup is complete. Your did:web is ready to use.",
         }
     }
 }
