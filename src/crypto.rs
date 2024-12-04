@@ -1,12 +1,24 @@
-use crate::errors::SetupResult;
+use crate::{context::SetupContext, errors::SetupResult};
 use base58::ToBase58;
 use k256::{elliptic_curve::sec1::ToEncodedPoint, SecretKey};
 use rand::rngs::OsRng;
+use std::path::Path;
 
 pub struct KeyPair {
     pub private_key: String,
     pub public_key_multibase: String,
 }
+
+impl KeyPair {
+    pub async fn save_to_file(&self, path: &Path) -> crate::errors::SetupResult<()> {
+        let key_path = path.join("private.key");
+        smol::fs::write(&key_path, &self.private_key)
+            .await
+            .with_fs_context(&key_path, "write private key to")?;
+        Ok(())
+    }
+}
+
 
 fn encode_private_multibase(data: &[u8]) -> String {
     // multicodec secp256k1-priv, code 0x1301

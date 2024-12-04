@@ -1,14 +1,14 @@
 use base58::FromBase58;
-use base64::Engine;
 use k256::{
-    ecdsa::{signature::Signer, Signature, SigningKey},
+    ecdsa::{SigningKey, Signature, signature::Signer},
     SecretKey,
 };
 use serde::{Deserialize, Serialize};
 use smol::fs;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 use time::OffsetDateTime;
+use base64::Engine;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{context::SetupContext, errors::SetupResult};
 
@@ -185,14 +185,12 @@ pub async fn generate_service_auth(
     let signature: Signature = signing_key.sign(signature_input.as_bytes());
 
     // Encode signature
-    let signature_encoded =
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(signature.to_der());
+    let signature_encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+        signature.to_der()
+    );
 
     // Combine all parts
-    Ok(format!(
-        "{}.{}.{}",
-        header_encoded, claims_encoded, signature_encoded
-    ))
+    Ok(format!("{}.{}.{}", header_encoded, claims_encoded, signature_encoded))
 }
 
 #[cfg(test)]
@@ -206,8 +204,7 @@ mod tests {
         let key_bytes = secret_key.to_bytes();
 
         let mut encoded = vec![0x81, 0x26];
-        encoded.extend_from_slice(&key_bytes);
-
+        encoded.extend_from_slice(key_bytes.as_ref());
         format!("z{}", base58::ToBase58::to_base58(&encoded[..]))
     }
 
@@ -272,15 +269,13 @@ mod tests {
         smol::block_on(async {
             let test_key = generate_test_key();
 
-            let result =
-                generate_service_auth("did:web:example.com", "did:web:pds.example.com", &test_key)
-                    .await;
+            let result = generate_service_auth(
+                "did:web:example.com",
+                "did:web:pds.example.com",
+                &test_key
+            ).await;
 
-            assert!(
-                result.is_ok(),
-                "Failed to generate service auth token: {:?}",
-                result.err()
-            );
+            assert!(result.is_ok(), "Failed to generate service auth token: {:?}", result.err());
 
             let token = result.unwrap();
             let parts: Vec<&str> = token.split('.').collect();

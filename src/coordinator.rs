@@ -103,10 +103,7 @@ impl SetupCoordinator {
             SetupStep::Keys => {
                 self.keypair = Some(crypto::generate_keypair().await?);
                 if let Some(keypair) = &self.keypair {
-                    let key_path = self.config_path.join("private.pem");
-                    fs::write(&key_path, &keypair.private_key)
-                        .await
-                        .with_document_context("Failed to save private key")?;
+                    keypair.save_to_file(&self.config_path).await?;
                 }
                 self.current_step = SetupStep::DidDocument;
             }
