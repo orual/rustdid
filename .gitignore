@@ -14,3 +14,6 @@ Cargo.lock
 *.pdb
 
 /.rustdid
+.direnv
+.envrc
+shell.nix

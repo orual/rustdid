@@ -15,6 +15,10 @@ impl KeyPair {
         smol::fs::write(&key_path, &self.private_key)
             .await
             .with_fs_context(&key_path, "write private key to")?;
+        let pub_path = path.join("public.key");
+        smol::fs::write(&pub_path, &self.public_key_multibase)
+            .await
+            .with_fs_context(&pub_path, "write public key to")?;
         Ok(())
     }
 }

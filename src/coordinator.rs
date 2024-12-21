@@ -6,6 +6,7 @@ use crate::{
     domain,
     errors::{SetupError, SetupResult},
 };
+use miette::IntoDiagnostic;
 use smol::fs;
 use std::path::PathBuf;
 use time::OffsetDateTime;
@@ -72,6 +73,7 @@ impl SetupCoordinator {
         self.current_step.clone()
     }
 
+
     pub async fn proceed(&mut self) -> SetupResult<()> {
         match self.current_step {
             SetupStep::Init => {
@@ -120,13 +122,20 @@ impl SetupCoordinator {
             }
             SetupStep::ServiceAuth => {
                 if let (Some(doc), Some(keypair)) = (&self.did_document, &self.keypair) {
-                    let pds_url = Url::parse(self.pds_host.as_ref().unwrap())
+                    let pds_host = if let Some(pds_host) = &self.pds_host {
+                        pds_host.clone()
+                    } else {
+                        String::from("https://pds.radiant-industries.space")
+                    };
+                    let pds_url = Url::parse(pds_host.as_str())
                         .map_err(|e| SetupError::url("Failed to parse URL", e.to_string()))?;
                     let pds_did = format!("did:web:{}", pds_url.host_str().unwrap());
+                    let auth = did::generate_service_auth(&doc.id, &pds_did, &keypair.private_key).await?;
 
-                    self.service_auth = Some(
-                        did::generate_service_auth(&doc.id, &pds_did, &keypair.private_key).await?,
-                    );
+                    fs::write(self.config_path.join("auth_jwt.txt"), auth.clone()).await.into_diagnostic()?;
+
+                    self.service_auth = Some(auth);
+                    
 
                     self.current_step = SetupStep::Account;
                 }
@@ -311,6 +320,37 @@ impl SetupCoordinator {
             SetupStep::Account => "Complete account setup with handle, password, and invite code",
             SetupStep::Complete => "Setup is complete. Your did:web is ready to use.",
         }
+    }
+
+    pub fn set_step(&mut self, step: SetupStep) {
+        self.current_step = step;
+    }
+
+    pub fn print_service_auth(&self) -> String {
+        if let Some(service_auth) = &self.service_auth {
+            service_auth.clone()
+        } else {
+            "Service auth not generated yet".to_string()
+        }
+    }
+
+    pub async fn load_did_doc(&mut self) {
+        let doc_path = self.config_path.join("did.json");
+        let doc = fs::read_to_string(doc_path).await.into_diagnostic().unwrap_or_default();
+        self.did_document = Some(serde_json::from_str(&doc).unwrap());
+    }
+
+    pub async fn load_key(&mut self) {
+        let key_path = self.config_path.join("private.key");
+        let mut key = fs::read_to_string(key_path).await.into_diagnostic().unwrap_or_default();
+        key = key.trim_end().to_string();
+        let pub_path = self.config_path.join("public.key");
+        let mut pub_key = fs::read_to_string(pub_path).await.into_diagnostic().unwrap_or_default();
+        pub_key = pub_key.trim_end().to_string();
+        self.keypair = Some(crypto::KeyPair {
+            private_key: key,
+            public_key_multibase: pub_key,
+        });
     }
 }
 

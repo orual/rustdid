@@ -46,6 +46,7 @@ enum SetupMode {
     Did,
     Account,
     KeyGen,
+    AuthGen,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -203,6 +204,12 @@ impl SetupUI {
             KeyCode::Char('3') => {
                 self.mode = SetupMode::KeyGen;
                 smol::block_on(self.generate_test_keys())?;
+                self.mode = SetupMode::Menu;
+                Ok(false)
+            }
+            KeyCode::Char('4') => {
+                self.mode = SetupMode::AuthGen;
+                smol::block_on(self.generate_service_auth())?;
                 self.mode = SetupMode::Menu;
                 Ok(false)
             }
@@ -426,6 +433,16 @@ impl SetupUI {
                         }
                         _ => {}
                     },
+                    SetupMode::AuthGen => match key.code {
+                        KeyCode::Enter => {
+                            self.generate_service_auth().await?;
+                            self.mode = SetupMode::Menu;
+                        }
+                        KeyCode::Esc => {
+                            self.mode = SetupMode::Menu;
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
@@ -552,6 +569,26 @@ impl SetupUI {
         }
         Ok(())
     }
+    async fn generate_service_auth(&mut self) -> SetupResult<()> {
+        self.add_output("Generating service authentication...".into());
+        self.coordinator.load_did_doc().await;
+        self.coordinator.load_key().await;
+        self.coordinator.set_step(SetupStep::ServiceAuth);
+        match self.coordinator.proceed().await {
+            Ok(_) => {
+                // let auth = did::generate_service_auth(
+                //     "did:plc:bxvb5jxj6mz3fdtbndw3cmor",
+                self.add_output("Service authentication generated successfully.".into());
+                self.add_output(self.coordinator.print_service_auth());
+            }
+            Err(e) => {
+                self.status_message = format!("Error: {}", e);
+                self.add_output(format!("Service auth generation failed: {}", e));
+                self.is_error = true;
+            }
+        }
+        Ok(())
+    }
 
     fn draw(&mut self) -> SetupResult<()> {
         let status_message = self.status_message.clone();
@@ -653,6 +690,8 @@ impl SetupUI {
                         Span::raw(" Account Setup  |  "),
                         Span::styled("3", Style::default().fg(Color::Blue)),
                         Span::raw(" Keygen (Devtool)  |  "),
+                        Span::styled("4", Style::default().fg(Color::Blue)),
+                        Span::raw(" Generate service auth (Devtool)  |  "),
                         Span::styled("ESC", Style::default().fg(Color::Blue)),
                         Span::raw(" Exit"),
                     ])],
