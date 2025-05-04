@@ -73,7 +73,6 @@ impl SetupCoordinator {
         self.current_step.clone()
     }
 
-
     pub async fn proceed(&mut self) -> SetupResult<()> {
         match self.current_step {
             SetupStep::Init => {
@@ -125,17 +124,19 @@ impl SetupCoordinator {
                     let pds_host = if let Some(pds_host) = &self.pds_host {
                         pds_host.clone()
                     } else {
-                        String::from("https://pds.radiant-industries.space")
+                        String::from("https://atproto.systems")
                     };
                     let pds_url = Url::parse(pds_host.as_str())
                         .map_err(|e| SetupError::url("Failed to parse URL", e.to_string()))?;
                     let pds_did = format!("did:web:{}", pds_url.host_str().unwrap());
-                    let auth = did::generate_service_auth(&doc.id, &pds_did, &keypair.private_key).await?;
+                    let auth =
+                        did::generate_service_auth(&doc.id, &pds_did, &keypair.private_key).await?;
 
-                    fs::write(self.config_path.join("auth_jwt.txt"), auth.clone()).await.into_diagnostic()?;
+                    fs::write(self.config_path.join("auth_jwt.txt"), auth.clone())
+                        .await
+                        .into_diagnostic()?;
 
                     self.service_auth = Some(auth);
-                    
 
                     self.current_step = SetupStep::Account;
                 }
@@ -336,16 +337,35 @@ impl SetupCoordinator {
 
     pub async fn load_did_doc(&mut self) {
         let doc_path = self.config_path.join("did.json");
-        let doc = fs::read_to_string(doc_path).await.into_diagnostic().unwrap_or_default();
+        let doc = fs::read_to_string(doc_path)
+            .await
+            .into_diagnostic()
+            .unwrap_or_default();
         self.did_document = Some(serde_json::from_str(&doc).unwrap());
+        let pds_host = self
+            .did_document
+            .as_ref()
+            .unwrap()
+            .service
+            .first()
+            .and_then(|s| s.service_endpoint.strip_prefix("https://"));
+        if let Some(pds_host) = pds_host {
+            self.set_pds_host(pds_host.to_string()).unwrap();
+        }
     }
 
     pub async fn load_key(&mut self) {
         let key_path = self.config_path.join("private.key");
-        let mut key = fs::read_to_string(key_path).await.into_diagnostic().unwrap_or_default();
+        let mut key = fs::read_to_string(key_path)
+            .await
+            .into_diagnostic()
+            .unwrap_or_default();
         key = key.trim_end().to_string();
         let pub_path = self.config_path.join("public.key");
-        let mut pub_key = fs::read_to_string(pub_path).await.into_diagnostic().unwrap_or_default();
+        let mut pub_key = fs::read_to_string(pub_path)
+            .await
+            .into_diagnostic()
+            .unwrap_or_default();
         pub_key = pub_key.trim_end().to_string();
         self.keypair = Some(crypto::KeyPair {
             private_key: key,

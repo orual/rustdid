@@ -64,6 +64,7 @@ struct JwtClaims {
     aud: String,
     exp: u64,
     iat: u64,
+    lxm: String,
 }
 
 impl SetupConfig {
@@ -174,6 +175,7 @@ pub async fn generate_service_auth(
         aud: audience.to_string(),
         exp: now + 300, // 5 minutes expiry
         iat: now,
+        lxm: "com.atproto.server.createAccount".to_string(),
     };
     let claims_encoded = encode_jwt_part(&claims)?;
 

@@ -8,10 +8,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
-use k256::{
-    elliptic_curve::sec1::ToEncodedPoint,
-    SecretKey,
-};
+use k256::{elliptic_curve::sec1::ToEncodedPoint, SecretKey};
 use rand::rngs::OsRng;
 use ratatui::{
     backend::CrosstermBackend,
@@ -442,7 +439,7 @@ impl SetupUI {
                             self.mode = SetupMode::Menu;
                         }
                         _ => {}
-                    }
+                    },
                 }
             }
         }
@@ -576,8 +573,6 @@ impl SetupUI {
         self.coordinator.set_step(SetupStep::ServiceAuth);
         match self.coordinator.proceed().await {
             Ok(_) => {
-                // let auth = did::generate_service_auth(
-                //     "did:plc:bxvb5jxj6mz3fdtbndw3cmor",
                 self.add_output("Service authentication generated successfully.".into());
                 self.add_output(self.coordinator.print_service_auth());
             }
@@ -669,8 +664,7 @@ impl SetupUI {
                 // Menu/Help Text
                 let menu = Paragraph::new(menu_text)
                     .style(Style::default().fg(Color::Magenta))
-                    .block(Block::default()
-                    .borders(Borders::ALL));
+                    .block(Block::default().borders(Borders::ALL));
                 f.render_widget(menu, chunks[3]);
 
                 // Output Area
